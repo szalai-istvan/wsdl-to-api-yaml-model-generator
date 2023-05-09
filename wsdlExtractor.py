@@ -1,3 +1,4 @@
+
 inputfilenames = [] # leave this empty to process all .wsdl and .xsd files in the directory of the script
 outputfilename = 'api.yaml'
 #-------------------------------------------------
@@ -8,9 +9,9 @@ XS_SIMPLE_TYPE_START = '<xs:simpleType name='
 XS_SIMPLE_TYPE_END = '</xs:simpleType>'
 XSD_SIMPLE_TYPE_START = '<xsd:simpleType name='
 XSD_SIMPLE_TYPE_END = '</xsd:simpleType>'
-XSD_RESTRICTION_BASE = '<xsd:restriction base='
+XSD_RESTRICTION_BASE = '<xsd:restriction base'
 XSD_RESTRICTION_END = '</xsd:restriction>'
-XS_RESTRICTION_BASE = '<xs:restriction base='
+XS_RESTRICTION_BASE = '<xs:restriction base'
 XS_RESTRICTION_END = '</xs:restriction>'
 
 COMPLEX_TYPE_START = '<xs:complexType name='
@@ -76,16 +77,16 @@ def transform(datatype):
     
     typemap = {
         'string': 'string',
-        'long': 'int64',
+        'long': 'integer',
         'int': 'integer',
         'boolean': 'boolean',
         'dateTime': 'date-time',
-        'decimal': 'double'
+        'decimal': 'number'
     }
     if datatype in typemap:
         return typemap[datatype]
     
-    return '#definitions/' + datatype
+    return '#/definitions/' + datatype
 
 def indent(line, level):
     return (2 * level * ' ') + line
@@ -122,6 +123,8 @@ def processOneComplexType(typename, types):
                     lines.append( indent('$ref: \''+datatype+'\'', 4) )
                 else:
                     lines.append( indent('type: '+datatype, 4) )
+                    if 'format' in value[fieldname]:
+                        lines.append( indent('format: '+value[fieldname]['format'], 4) )
         else:
             lines.append( indent('type: array', 4) )
             lines.append( indent('items: ', 4) )
@@ -133,7 +136,20 @@ def processOneSimpleType(typename, simpleTypes):
     value = simpleTypes[typename]
     lines = []
     lines.append( indent(typename+':', 1) )
-    lines.append( indent('type: object', 2) )
+    if 'enum' in value:
+        lines.append( indent('type: string', 2) )
+        lines.append( indent('enum: ' + str(value['enum']).replace('\'', ''), 2) )
+        return joinLines(lines)
+    elif 'type' in value and value['type'] == 'string':
+        for key in value.keys():
+            if type(value[key]) is str:
+                lines.append( indent(key + ': ' + value[key], 2) )
+            else:
+                lines.append( indent(key+': '+str(value[key]).replace('\'', ''),2) )
+        return joinLines(lines)
+    else:
+        lines.append( indent('type: object', 2) )
+
     lines.append( indent('properties: ',2) )
     lines.append( indent('value: ',3) )
 
@@ -151,6 +167,8 @@ def extractSimpleTypes(filename):
     with open(filename, encoding="utf-8") as file:
         insideRestriction = false
         for line in file:
+            line = line.replace(' =', '=')
+            line = line.replace('= ', '=')
             if COMMENT in line:
                 continue
             if XS_SIMPLE_TYPE_START in line or XSD_SIMPLE_TYPE_START in line:
@@ -166,8 +184,13 @@ def extractSimpleTypes(filename):
                 name = line.split('"')[1]
                 if ':' in name:
                     name = name.split(':')[1]
-            
-                simpleTypes[type_]['type'] = transform( name )
+
+                transformed = transform( name )
+                simpleTypes[type_]['type'] = transformed
+                if name == 'long':
+                    simpleTypes[type_]['format'] = 'int64'
+                elif name == 'decimal':
+                    simpleTypes[type_]['format'] = 'double'
                 insideRestriction = true
                 continue
             if XSD_RESTRICTION_END in line or XS_RESTRICTION_END in line:
@@ -212,8 +235,12 @@ def extractComplexTypes(filename):
             if insideContent:
                 typedef = extractType(line)
                 if typedef is not None:
+                    
                     types[type_][typedef['dataname']] = {'datatype': transform(typedef['datatype']), 'array': typedef['array']}    
-
+                    if typedef['datatype'] == 'long':
+                        types[type_][typedef['dataname']]['format'] = 'int64'
+                    elif typedef['datatype'] == 'decimal':
+                        types[type_][typedef['dataname']]['format'] = 'double'
 #-----------------------------------------------------#
 # End of function definitions and start of processing #
 #-----------------------------------------------------#
